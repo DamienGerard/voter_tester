@@ -12,7 +12,7 @@ import 'package:uuid/uuid.dart';
 import 'paillier_encrpyt/paillier_private_key.dart';
 import 'paillier_encrpyt/paillier_public_key.dart';
 
-const String urlEA = 'https://5b6fdcecf18a.ngrok.io';
+const String urlEA = 'https://77d4-102-161-66-167.ngrok.io';
 String identifier = 'voter';
 Database getDB() {
   //WidgetsFlutterBinding.ensureInitialized();

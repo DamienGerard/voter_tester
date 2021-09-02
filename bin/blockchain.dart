@@ -17,7 +17,7 @@ class Blockchain {
     blockchain._candidates = election.getCandidates();
     var blocksToAdd = await Block.getBlocksByElection(election.election_id);
     blocksToAdd.sort();
-    await blockchain.addList(blocksToAdd);
+    await blockchain.addList(blocksToAdd, true);
     return blockchain;
   }
 
@@ -57,7 +57,7 @@ class Blockchain {
     return true;
   }
 
-  Future<void> add(Block block) async {
+  Future<void> add(Block block, bool isElectionConstruction) async {
     if (await isBlockValid(block, _blocks.last) &&
         !_mapVoterBlock.containsKey(block.voter_nid)) {
       _blocks.add(block);
@@ -70,10 +70,13 @@ class Blockchain {
       }
       print(
           'block ${block.block_id} from ${block.voter_nid} is added to the blockchain');
-      await save();
+      if (!isElectionConstruction) {
+        await save();
+      }
+
       print(
           'block ${block.block_id} from ${block.voter_nid} is saved to the blockchain');
-      display();
+      //display();
     } else {
       //throw Exception('Invalid block');
       print(
@@ -81,10 +84,11 @@ class Blockchain {
     }
   }
 
-  Future<void> addList(List<Block> blockList) async {
+  Future<void> addList(
+      List<Block> blockList, bool isElectionConstruction) async {
     for (final block in blockList) {
       try {
-        await add(block);
+        await add(block, isElectionConstruction);
       } catch (e) {
         //continue;
         print('could not add the following block: ');

@@ -176,6 +176,10 @@ class Ballot {
     final minValidation =
         (numVerifiers * pow(0.95, log(numVerifiers))).toInt() + 1;
     if (numValidations < minValidation) {
+      print('num validation: ${numValidations}');
+      print('num verifiers: ${numVerifiers}');
+      print('min validation: ${minValidation}');
+      print('BALLOT NOT VALIDATED');
       return false;
     }
     return true;

@@ -81,7 +81,7 @@ class Message {
   Future<bool> isValid() async {
     final db = getDB();
     final sinceCreation = DateTime.now().difference(timestamp).inSeconds;
-    if (sinceCreation > 300 || sinceCreation < 0) {
+    if (sinceCreation > 300 /*|| sinceCreation < 0*/) {
       return false;
     }
     var duplicate_msg = db.select(
@@ -112,9 +112,9 @@ class Message {
             await Socket.connect(peer.ip_address, peer.responding_port);
 
         //print(jsonEncode(msg.toJson()));
-        socket.write(msg.toJson());
+        socket.write(jsonEncode(msg.toJson()));
         //sleep(Duration(seconds: 1));
-        print('messageSent');
+        //print('messageSent');
         //socket.close();
       } on SocketException {
         continue;

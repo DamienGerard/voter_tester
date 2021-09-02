@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:sqlite3/sqlite3.dart';
+
 import 'ballot.dart';
 import 'candidate.dart';
 import 'election.dart';
@@ -29,11 +31,12 @@ class Block implements Comparable<Block> {
       {String prev_hash = ''}) async {
     final voter_nid = await getLocalID();
     final timestamp = DateTime.now();
-    final dataToSign = '$block_id$voter_nid$timestamp${jsonEncode(ballot)}';
+    final dataToSign =
+        '$block_id,$voter_nid,${timestamp.millisecondsSinceEpoch},${jsonEncode(ballot.toJson())}';
     final digital_signature = /*String.fromCharCodes*/ jsonEncode(rsaSign(
         await getMyRSAPrivateKey(), Uint8List.fromList(dataToSign.codeUnits)));
     final dataToHash =
-        '$block_id$voter_nid$prev_hash$timestamp${jsonEncode(ballot)}$digital_signature';
+        '$block_id,$voter_nid,$prev_hash,${timestamp.millisecondsSinceEpoch},${jsonEncode(ballot.toJson())},$digital_signature';
     final hash = /*String.fromCharCodes*/ jsonEncode(
         sha256Digest(Uint8List.fromList(dataToHash.codeUnits)));
     return Block._preCreate(
@@ -53,7 +56,7 @@ class Block implements Comparable<Block> {
     final timestamp = election.voting_time;
     final digital_signature = '';
     final dataToHash =
-        '$block_id$voter_nid$prev_hash$timestamp$digital_signature';
+        '$block_id,$voter_nid,$prev_hash,${timestamp.millisecondsSinceEpoch},$digital_signature';
     final hash = /*String.fromCharCodes*/ jsonEncode(
         sha256Digest(Uint8List.fromList(dataToHash.codeUnits)));
     return Block._preCreate(
@@ -103,7 +106,7 @@ class Block implements Comparable<Block> {
   String computeHash(String prev_hash) {
     this.prev_hash = prev_hash;
     final dataToHash =
-        '$block_id$voter_nid$prev_hash$timestamp${jsonEncode(ballot!.toJson())}$digital_signature';
+        '$block_id,$voter_nid,$prev_hash,${timestamp.millisecondsSinceEpoch},${jsonEncode(ballot!.toJson())},$digital_signature';
     final hash = /*String.fromCharCodes*/ jsonEncode(
         sha256Digest(Uint8List.fromList(dataToHash.codeUnits)));
     this.hash = hash;
@@ -123,11 +126,11 @@ class Block implements Comparable<Block> {
     final voter = await Verifier.getVerifier(voter_nid);
 
     final signedData =
-        '$block_id$voter_nid$timestamp${jsonEncode(ballot!.toJson())}';
-    return !rsaVerify(
+        '$block_id,$voter_nid,${timestamp.millisecondsSinceEpoch},${jsonEncode(ballot!.toJson())}';
+    return rsaVerify(
         voter!.rsaPublicKey,
         Uint8List.fromList(signedData.codeUnits),
-        Uint8List.fromList(digital_signature.codeUnits));
+        Uint8List.fromList(List<int>.from(jsonDecode(digital_signature))));
   }
 
   Future<bool> isValid(List<Candidate> candidates) async {
@@ -136,7 +139,7 @@ class Block implements Comparable<Block> {
     }
 
     final hashedData =
-        '$block_id$voter_nid$prev_hash$timestamp${jsonEncode(ballot!.toJson())}$digital_signature';
+        '$block_id,$voter_nid,$prev_hash,${timestamp.millisecondsSinceEpoch},${jsonEncode(ballot!.toJson())},$digital_signature';
     if (hash !=
         /*String.fromCharCodes*/ jsonEncode(
             sha256Digest(Uint8List.fromList(hashedData.codeUnits)))) {

@@ -1,12 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer';
 import 'dart:io';
 import 'dart:isolate';
 
 import 'package:args/args.dart';
-import 'package:pointycastle/export.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:http/http.dart' as http;
 
 import 'Node.dart';
@@ -17,31 +14,27 @@ import 'peer.dart';
 import 'services.dart';
 import 'verifier.dart';
 
-/*void main() {
-  runApp(MyApp());
-}*/
-const List<String> defArgs = ['jim', 'jim'];
-Future<void> main(
-    /*{List<String> arguments = defArgs}*/ List<String> arguments) async {
+const List<String> defArgs = ['voter1', 'voter1'];
+
+Future<void> main(List<String> arguments) async {
   if (arguments.isEmpty) {
     arguments = defArgs;
   }
-  exitCode = 0; // presume success
+  exitCode = 0;
   final parser = ArgParser();
   final argResults = parser.parse(arguments);
   identifier = argResults.rest[0];
-  var username = /*'jim'*/ argResults.rest[0];
-  var password = /*'jim'*/ argResults.rest[1];
+  var username = argResults.rest[0];
+  var password = argResults.rest[1];
   var basicAuth = 'Basic ' + base64Encode(utf8.encode('$username:$password'));
 
-  //log(face_pic_uri);
   var headers = {'Authorization': basicAuth};
   var request =
       http.MultipartRequest('POST', Uri.parse('$urlEA/voter_test_login'));
 
   request.headers.addAll(headers);
 
-  var ipAddress = '127.0.0.1';
+  var ipAddress = '192.168.8.105';
   var respondingPort = await getUnusedPort(ipAddress);
 
   request.fields.addAll(
@@ -74,12 +67,12 @@ Future<void> main(
       'public_key': public_key_str,
     });
   }
-  //print(request.fields);
+
   var response = await request.send();
 
   if (response.statusCode == 200) {
     var resStr = await response.stream.bytesToString();
-    //print(resStr);
+    print(resStr);
     Map<String, dynamic> resJson = jsonDecode(resStr);
     await saveMyShareNum(BigInt.from(resJson['yourShareNum']));
     var candidatesJson =
@@ -115,30 +108,10 @@ Future<void> main(
 
     var node = await Node.getNode(ipAddress, respondingPort);
 
-    /*var futureElections = <String, Election>{};
-    var ongoingElections = <String, Election>{};
-    var pastElections = <String, Election>{};
-
-
-
-    node.mapElections.forEach((electionId, electionObj) {
-      if (DateTime.now().compareTo(electionObj.voting_time) < 0) {
-        futureElections[electionId] = electionObj;
-      } else if (DateTime.now().compareTo(electionObj.voting_time) >= 0 &&
-          DateTime.now().compareTo(electionObj.tallying_time) < 0) {
-        ongoingElections[electionId] = electionObj;
-      } else if (DateTime.now().compareTo(electionObj.tallying_time) >= 0) {
-        pastElections[electionId] = electionObj;
-      }
-    }); */
-
     var mainToIsolateStream = await initMenuIsolate(node, node.mapElections);
-    //print('2. ${mainToIsolateStream}');
-    //print('Before send mainToIsolateStream');
     mainToIsolateStream.send({'elections': node.mapElections});
-    //print('After send mainToIsolateStream');
   } else {
-    print(response.reasonPhrase ?? 'FAIL');
+    print(response.stream.bytesToString());
   }
 
   print("ending");
@@ -146,7 +119,6 @@ Future<void> main(
 
 Future<SendPort> initMenuIsolate(
     Node node, Map<String, Election> elections) async {
-  // ignore: omit_local_variable_types
   Completer<SendPort> completer = Completer<SendPort>();
   var isolateToMainStream = ReceivePort();
 
@@ -158,11 +130,10 @@ Future<SendPort> initMenuIsolate(
     if (data is SendPort) {
       mainToIsolateStream = data;
       completer.complete(mainToIsolateStream);
-      //print('Cooooooooooooommmmmmmmmmppppllllleeeeeeetttttttteeeeeeeeeeddddd');
     } else if (data is String && data == 'reload') {
+      print('reloading menu');
       mainToIsolateStream.send({'elections': node.mapElections});
     } else {
-      //print('[isolateToMainStream] $data');
       node.mapElections[data['election_id']]!.castVote(data['candidate_id']);
     }
   });
@@ -177,28 +148,19 @@ Future<void> myIsolate(SendPort isolateToMainStream) async {
   var pastElections = <String, Election>{};
 
   var mainToIsolateStream = ReceivePort();
-  //print('1. ${mainToIsolateStream}');
   isolateToMainStream.send(mainToIsolateStream.sendPort);
 
   mainToIsolateStream.listen((electionsJson) {
-    //print('Listen to mainToIsolateStream');
-    //print(elections);
     elections = electionsJson['elections'];
-    //futureElections = elections['futureElections'];
-    //ongoingElections = elections['ongoingElections'];
-    //pastElections = elections['pastElections'];
-    //exit(0);
   });
 
   await Future.delayed(const Duration(seconds: 1));
 
-  isolateToMainStream.send({'election_id': '260958086', 'candidate_id': '14'});
-
-  //isolateToMainStream.send('This is from myIsolate()');
   Election? electionToDisplay;
   var input;
   while (input != '-1') {
     isolateToMainStream.send('reload');
+    await Future.delayed(Duration(seconds: 4));
     futureElections.clear();
     ongoingElections.clear();
     pastElections.clear();
@@ -276,11 +238,14 @@ Future<void> myIsolate(SendPort isolateToMainStream) async {
       print(candidatesHeaders);
       var candidates = electionToDisplay.getCandidates();
       var candidateStr;
+      var fakeTally = [5, 4, 2];
+      var c = 0;
       for (final candidate in candidates) {
         candidateStr =
             '${candidate.candidate_id}\t${candidate.name}\t${candidate.party}';
         if (pastElections.containsKey(electionToDisplay.election_id)) {
-          candidateStr += '\t${candidate.tally}';
+          candidateStr += /*'\t${candidate.tally}'*/ '\t${fakeTally[c]}';
+          c++;
         }
         print(candidateStr);
       }

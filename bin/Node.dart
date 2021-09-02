@@ -27,7 +27,13 @@ class Node {
   Future<void> initElections() async {
     var electionList = await Election.elections();
     for (var election in electionList) {
-      mapElections[election!.election_id] = election;
+      if (DateTime.now().compareTo(election!.tallying_time) >= 0) {
+        if (!election.isTallySet()) {
+          await election.postConstructionTallying();
+        }
+      }
+
+      mapElections[election.election_id] = election;
     }
   }
 
@@ -35,13 +41,8 @@ class Node {
     responder = await ServerSocket.bind(address, port);
 
     responder.listen((socket) {
-      print('socket.hashCode');
-      var c = 0;
       var msgSrt = '';
-      print(socket.hashCode);
-      socket.cast<List<int>>().transform(utf8.decoder)
-          /*.transform(json.decoder)*/
-          .listen((data) {
+      socket.cast<List<int>>().transform(utf8.decoder).listen((data) {
         msgSrt = msgSrt + data;
         try {
           Map<String, dynamic> msgJsno = jsonDecode(msgSrt);
@@ -49,46 +50,24 @@ class Node {
         } on Exception {
           print('Incomplete message received');
         }
-        c++;
-        print(c);
       });
     });
-
-    /*responder
-        .cast<List<int>>()
-        .transform(utf8.decoder)
-        .listen(handleConnection);
-
-    responder.listen((client) {
-      //client.transform(UTF8.decoder).listen(handleConnection);
-      handleConnection(client);
-    });*/
   }
 
-  void handleConnection(
-      /*client*/ data) /*{
-    client.transform(utf8.decoder).transform(json.decoder).listen(
-      (data) async*/
-  async {
-    print('messageReceived');
-    //print(data);
-    //return;
-    //final requestStr = String.fromCharCodes(data);
+  void handleConnection(data) async {
+    //print('messageReceived');
     Map<String, dynamic> requestJson = data;
-    /*try {
-          requestJson = jsonDecode(String.fromCharCodes(data));
-        } on FormatException {
-          print('REQUEST STRING ON EXCEPTION: ');
-          //print(requestStr);
-        }*/
-    //final requestJson = jsonDecode(requestStr);
     final msg = Message.fromJson(requestJson);
-    print(msg.message_title);
+    //print(msg.message_title);
     if (!await msg.isValid()) {
-      print('msg invalid');
+      //print('msg invalid');
+      print(
+          'Message Received: ${msg.message_title} from ${msg.sender_nid} is NOT VALID');
       return;
     }
-    print('valid msg');
+    //print('valid msg');
+    print(
+        'Message Received: ${msg.message_title} from ${msg.sender_nid} is VALID');
     //await msg.save();
     if (msg.message_title == 'Hello') {
       print('waaasssuupp!!!');
@@ -107,13 +86,17 @@ class Node {
       if (mapElections.containsKey(msg.content['election_id'])) {
         mapElections[msg.content['election_id']]!.handlePreapprovedBlocks(msg);
       }
-    } /*else if (msg.message_title == 'Blockchain_Update_Request') {
-          if (mapElections.containsKey(msg.content['election_id'])) {
-            await mapElections[msg.content['election_id']]!
-                .handleBlockchainUpdateRequest(client, msg);
-          }
-        }*/
-    else if (msg.message_title == 'SubTally_Request') {
+    } else if (msg.message_title == 'Blockchain_Update_Request') {
+      if (mapElections.containsKey(msg.content['election_id'])) {
+        await mapElections[msg.content['election_id']]!
+            .handleBlockchainUpdateRequest(msg);
+      }
+    } else if (msg.message_title == 'Blockchain_Update_Response') {
+      if (mapElections.containsKey(msg.content['election_id'])) {
+        await mapElections[msg.content['election_id']]!
+            .handleBlockchainUpdateResponse(msg);
+      }
+    } else if (msg.message_title == 'SubTally_Request') {
       if (mapElections.containsKey(msg.content['election_id'])) {
         await mapElections[msg.content['election_id']]!
             .handleSubTallyRequest(msg);

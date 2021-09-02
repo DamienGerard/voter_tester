@@ -37,6 +37,8 @@ class Election {
 
   Ballot? myBallot; //In case i'm voting
 
+  String mostApprovedHash = '';
+
   Election._create(
       {required this.election_id,
       required this.voting_time,
@@ -79,38 +81,84 @@ class Election {
           election.approveBlocks(t);
         });
       });
-    } else if (DateTime.now().compareTo(tallying_time) >= 0) {
+    }
+    /*else if (DateTime.now().compareTo(tallying_time) >= 0) {
       if (!election.isTallySet()) {
         await Message.broadcast(
             'Blockchain_Last_Hash_Request', {'election_id': election_id});
-        await Future.delayed(const Duration(seconds: 5), () => "1");
+        await Future.delayed(const Duration(seconds: 15), () => "1");
         //sleep(Duration(seconds: 30));
-        String mostCommonLastHash = election._getMostApprovedHash();
-        final mapLastHashListResponder = election._mapLastHashListResponder;
+        election._getMostApprovedHash();
+        print('Most approved last hash: ${election.mostApprovedHash}');
+        final mapLastHashListResponder =
+            Map<String, List<String>>.from(election._mapLastHashListResponder);
         election._mapLastHashListResponder.clear();
         election._mapResponderLastHash.clear();
         /*if (mostCommonLastHash == '') {
           return null;
         }*/
-        if (election._blockchain!.getLastBlock().hash != mostCommonLastHash &&
+        if (election._blockchain!.getLastBlock().hash !=
+                election.mostApprovedHash &&
             mapLastHashListResponder.isNotEmpty) {
           Peer responder;
-          var responders =
-              mapLastHashListResponder[mostCommonLastHash] ?? <String>[];
+          var responders = List<String>.from(
+              mapLastHashListResponder[election.mostApprovedHash] ??
+                  <String>[]);
           for (final responderNid in responders) {
             responder = (await Peer.getPeer(responderNid))!;
             if (responder == null) {
               continue;
             }
             await election.makeBlockchainUpdateRequest(
-                responder, mostCommonLastHash);
+                responder, election.mostApprovedHash);
           }
         }
         /*await*/ election.computeTally();
       }
-    }
+    }*/
 
     return election;
+  }
+
+  Future<void> postConstructionTallying() async {
+    if (DateTime.now().compareTo(tallying_time) >= 0) {
+      if (!isTallySet()) {
+        await Message.broadcast(
+            'Blockchain_Last_Hash_Request', {'election_id': election_id});
+        await Future.delayed(const Duration(seconds: 60), () => "1");
+        //sleep(Duration(seconds: 30));
+        _getMostApprovedHash();
+        print('Most approved last hash: $mostApprovedHash');
+        final mapLastHashListResponder =
+            Map<String, List<String>>.from(_mapLastHashListResponder);
+        if (_mapLastHashListResponder.isEmpty) {
+          print('Nobody responded to Blockchain_Last_Hash_Request');
+        } else {
+          _mapResponderLastHash.forEach((key, value) {
+            print('$key : $value');
+          });
+        }
+        _mapLastHashListResponder.clear();
+        _mapResponderLastHash.clear();
+        /*if (mostCommonLastHash == '') {
+          return null;
+        }*/
+        if (_blockchain!.getLastBlock().hash != mostApprovedHash &&
+            mapLastHashListResponder.isNotEmpty) {
+          Peer responder;
+          var responders = List<String>.from(
+              mapLastHashListResponder[mostApprovedHash] ?? <String>[]);
+          for (final responderNid in responders) {
+            responder = (await Peer.getPeer(responderNid))!;
+            if (responder == null) {
+              continue;
+            }
+            await makeBlockchainUpdateRequest(responder, mostApprovedHash);
+          }
+        }
+        await computeTally();
+      }
+    }
   }
 
   static Future<Election?> fromJson(Map<String, dynamic> json,
@@ -158,9 +206,15 @@ class Election {
       'last_hash': _blockchain!.getLastBlock().hash
     });
     final requester = await Peer.getPeer(req.sender_nid);
-    var socket =
-        await Socket.connect(requester!.ip_address, requester.responding_port);
-    socket.write(jsonEncode(res.toJson()));
+    try {
+      var socket = await Socket.connect(
+          requester!.ip_address, requester.responding_port);
+      socket.write(jsonEncode(res.toJson()));
+      await socket.close();
+    } on SocketException {
+      print(
+          'Fail to connect to ${requester!.peer_nid} for Blockchain_Last_Hash_Response');
+    }
   }
 
   void handleBlockchainLastHashResponse(Message res) {
@@ -211,9 +265,9 @@ class Election {
     }
     await Message.broadcast('Preapproved_Blocks',
         {'election_id': election_id, 'last_hash': prev_hash});
-    await Future.delayed(const Duration(seconds: 5), () => "1");
+    await Future.delayed(const Duration(seconds: 15), () => "1");
     //sleep(Duration(seconds: 30));
-    var mostApprovedHash = _getMostApprovedHash();
+    _getMostApprovedHash();
     final mapLastHashListResponder =
         Map<String, List<String>>.from(_mapLastHashListResponder);
     _mapLastHashListResponder.clear();
@@ -222,7 +276,7 @@ class Election {
       return;
     }
     if (prev_hash == mostApprovedHash) {
-      _blockchain!.addList(unapprovedBlocks);
+      _blockchain!.addList(unapprovedBlocks, false);
     } else {
       Peer? approver;
       var responders = mapLastHashListResponder[mostApprovedHash] ?? <String>[];
@@ -242,31 +296,18 @@ class Election {
       'election_id': election_id,
       'last_hash': _blockchain!.getLastBlock().hash
     });
-    Socket socket = await Socket.connect(peer.ip_address, peer.responding_port);
-    socket.write(jsonEncode(req.toJson()));
-    socket.listen(
-      (Uint8List data) async {
-        final requestStr = String.fromCharCodes(data);
-        final requestJson = jsonDecode(requestStr).cast<Map<String, dynamic>>();
-        final msg = Message.fromJson(requestJson);
 
-        if (!await msg.isValid()) {
-          return;
-        }
-
-        await handleBlockchainUpdateResponse(msg, mostCommonLastHash);
-      },
-      onError: (error) {
-        print(error);
-        socket.destroy();
-      },
-      onDone: () {
-        socket.destroy();
-      },
-    );
+    try {
+      var socket = await Socket.connect(peer.ip_address, peer.responding_port);
+      socket.write(jsonEncode(req.toJson()));
+      await socket.close();
+    } on SocketException {
+      print(
+          'Fail to connect to ${peer.peer_nid} for Blockchain_Update_Request');
+    }
   }
 
-  Future<void> handleBlockchainUpdateRequest(Socket socket, Message msg) async {
+  Future<void> handleBlockchainUpdateRequest(Message msg) async {
     if (msg.message_title != 'Blockchain_Update_Request') {
       return;
     }
@@ -278,18 +319,27 @@ class Election {
       return;
     }
     final jsonBlocks = _blockchain!.toJsonAsFrom(lastHash);
-    await makeBlockchainUpdateResponse(socket, msg.sender_nid, jsonBlocks);
+    await makeBlockchainUpdateResponse(msg.sender_nid, jsonBlocks);
   }
 
-  Future<void> makeBlockchainUpdateResponse(Socket socket, String requesterNid,
-      List<Map<String, dynamic>> blocks) async {
+  Future<void> makeBlockchainUpdateResponse(
+      String requesterNid, List<Map<String, dynamic>> blocks) async {
     var res = await Message.write(requesterNid, 'Blockchain_Update_Response',
         {'election_id': election_id, 'blocks': blocks});
-    socket.write(jsonEncode(res.toJson()));
+    final requester = await Peer.getPeer(requesterNid);
+
+    try {
+      var socket = await Socket.connect(
+          requester!.ip_address, requester.responding_port);
+      socket.write(jsonEncode(res.toJson()));
+      await socket.close();
+    } on SocketException {
+      print(
+          'Fail to connect to ${requester!.peer_nid} for Blockchain_Update_Response');
+    }
   }
 
-  Future<void> handleBlockchainUpdateResponse(
-      Message msg, String mostCommonLastHash) async {
+  Future<void> handleBlockchainUpdateResponse(Message msg) async {
     if (msg.message_title != 'Blockchain_Update_Response') {
       return;
     }
@@ -297,15 +347,19 @@ class Election {
       return;
     }
 
-    final receivedBlocks = Block.getBlocksFromJson(msg.content['blocks']);
-    if (receivedBlocks.last.hash != mostCommonLastHash) {
+    final receivedBlocks = Block.getBlocksFromJson(
+        List<Map<String, dynamic>>.from(msg.content['blocks']));
+    if (receivedBlocks.isEmpty) {
+      return;
+    }
+    if (receivedBlocks.last.hash != mostApprovedHash) {
       return;
     }
     if (!(await _blockchain!
         .isBlockListValid(receivedBlocks, _blockchain!.getLastBlock()))) {
       return;
     }
-    _blockchain!.addList(receivedBlocks);
+    await _blockchain!.addList(receivedBlocks, false);
   }
 
   String _getMostApprovedHash() {
@@ -315,7 +369,7 @@ class Election {
     //this._mapLastHashListResponder.clear();
     //this._mapResponderLastHash.clear();
     int numApprover = 0;
-    String mostApprovedHash = '';
+    mostApprovedHash = '';
     mapBlocksListApprover.forEach((hash, listApprover) {
       if (listApprover.length > numApprover) {
         numApprover = listApprover.length;
@@ -334,26 +388,28 @@ class Election {
     return true;
   }
 
-  static Future<List<Election?>> elections() async {
-    final db = getDB();
+  static Future<List<Election?>> elections({bool toConstruct = true}) async {
+    final db = await getDB();
 
     var raw_election_list = db.select('SELECT * FROM election');
 
     var election_list = <Election?>[];
 
     for (final raw_election in raw_election_list) {
-      election_list.add(await Election.fromJson(raw_election));
+      election_list
+          .add(await Election.fromJson(raw_election, toConstruct: toConstruct));
     }
     //await db.close();
     return election_list;
   }
 
-  static Future<Election?> getElection(String election_id) async {
+  static Future<Election?> getElection(String election_id,
+      {bool toConstrut = false}) async {
     final db = await getDB();
-    var raw_election =
-        db.select('SELECT * FROM election WHERE election_id = $election_id');
+    var raw_election = db
+        .select('SELECT * FROM election WHERE election_id = ?', [election_id]);
     final election_json = raw_election.elementAt(0);
-    return await Election.fromJson(election_json);
+    return await Election.fromJson(election_json, toConstruct: toConstrut);
   }
 
   Future<void> _initCandidates() async {
@@ -415,7 +471,7 @@ class Election {
         }
       }
     }
-    for (final candidate in _candidate_list) {
+    /*for (final candidate in _candidate_list) {
       if ((await getMyPaillierPublicKey())
               .encrypt(candidate.localSubTally, rPow: blocks.length - 1) ==
           candidate.test) {
@@ -423,7 +479,7 @@ class Election {
       } else {
         print('homomorphic DON\'T works');
       }
-    }
+    }*/
   }
 
   Future<void> computeTally() async {
@@ -434,7 +490,7 @@ class Election {
     final numTerms = polynomDegree + 1;
     final minimalNumOfPoint = numTerms /*+*/ - 1;
     var attempts = 0;
-    while (!isTallySet() && attempts < 10) {
+    while (!isTallySet() && attempts < 3) {
       await Message.broadcast('SubTally_Request', {'election_id': election_id});
       await Future.delayed(const Duration(seconds: 20), () => "1");
       //sleep(Duration(seconds: 5));
@@ -476,9 +532,14 @@ class Election {
       'map_candidate_subTally': mapCandidateSubTally
     });
     final requester = await Peer.getPeer(req.sender_nid);
-    var socket =
-        await Socket.connect(requester!.ip_address, requester.responding_port);
-    socket.write(jsonEncode(res.toJson()));
+
+    try {
+      var socket = await Socket.connect(
+          requester!.ip_address, requester.responding_port);
+      socket.write(jsonEncode(res.toJson()));
+    } on SocketException {
+      print('Fail to connect to ${requester!.peer_nid} for SubTally_Response');
+    }
   }
 
   void handleSubTallyResponse(Message res) {
@@ -503,6 +564,8 @@ class Election {
         }
         mapCandidateSubTallies[candidateId]![
             mapVerifier[res.sender_nid]!.shareNum] = subTallyNum;
+      } else {
+        print('Tallying segment from ${res.sender_nid} is NOT valid!!!');
       }
     });
     /*} catch (e) {
@@ -544,7 +607,7 @@ class Election {
       //print(myBallot!.toJson());
       await Message.broadcast('Ballot_Validation_Request',
           {'election_id': election_id, 'ballot': myBallot!.toJson()});
-      await Future.delayed(const Duration(seconds: 10), () => "1");
+      await Future.delayed(const Duration(seconds: 30), () => "1");
       //sleep(Duration(seconds: 60));
       ballotValidationAttempt++;
     }
@@ -587,6 +650,8 @@ class Election {
           makeBallotValidationResponse(req, validation);
         });
       } else {
+        print(
+            'Ballot with id: ${ballotToValidate.ballot_id} from ${req.sender_nid} contains INVALID share');
         await Message.broadcast('Ballot_Share_Complaint', {
           'election_id': election_id,
           'ballot_id': ballotToValidate.ballot_id,
@@ -595,6 +660,9 @@ class Election {
               .toJson()
         });
       }
+    } else {
+      print(
+          'Ballot with id: ${ballotToValidate.ballot_id} from ${req.sender_nid} is NOT valid!!!');
     }
   }
 
@@ -637,9 +705,15 @@ class Election {
       'validation': validation
     });
     var requester = await Peer.getPeer(req.sender_nid);
-    var socket =
-        await Socket.connect(requester!.ip_address, requester.responding_port);
-    socket.write(jsonEncode(res.toJson()));
+
+    try {
+      var socket = await Socket.connect(
+          requester!.ip_address, requester.responding_port);
+      socket.write(jsonEncode(res.toJson()));
+    } on SocketException {
+      print(
+          'Fail to connect to ${requester!.peer_nid} for Ballot_Validation_Response');
+    }
   }
 
   Future<void> handleBallotValidationResponse(Message res) async {
@@ -665,6 +739,8 @@ class Election {
     }
     var blockToApprove = Block.fromJson(req.content['block']);
     if (!await blockToApprove.isUnapprovedValid(_candidate_list)) {
+      print(
+          'Block with id: ${blockToApprove.block_id} from ${req.sender_nid} has an invalid digital signature');
       return;
     }
     for (final stagedBlock in unapprovedBlocks) {
@@ -676,7 +752,7 @@ class Election {
   }
 
   Future<void> save() async {
-    final db = getDB();
+    final db = await getDB();
     for (final candidate in _candidate_list) {
       await candidate.save(election_id);
     }
@@ -698,21 +774,5 @@ class Election {
     } on SqliteException {
       print('SqliteException');
     }
-
-    /*try {
-      await db.insert(
-        'election',
-        {
-          'election_id': election_id,
-          'name': name,
-          'voting_time': '${voting_time.millisecondsSinceEpoch}',
-          'tallying_time': '${tallying_time.millisecondsSinceEpoch}',
-          'has_voted': hasVoted
-        },
-        conflictAlgorithm: ConflictAlgorithm.abort,
-      );
-    } on DatabaseException {
-      print('Cannot divide by zero');
-    }*/
   }
 }

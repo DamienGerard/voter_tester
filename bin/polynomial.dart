@@ -82,7 +82,7 @@ class Polynomial {
     //final BigInt n = BigInt.parse('2305843009213693951');
     double result = 0;
     mapCandidateSubTallies!.forEach((xn, yn) {
-      print('$xn, $yn');
+      //print('$xn, $yn');
       BigInt numerator = BigInt.one;
       BigInt denominator = BigInt.one;
       numerator = yn % n;
